@@ -10,6 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Roboto+Condensed:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script>
     tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'sans-serif'], condensed: ['Roboto Condensed', 'sans-serif'] } } } }
   </script>
@@ -61,7 +62,57 @@
             <span class="text-xs text-slate-300">Daftar foto (<span id="photoCount">0</span>) - klik untuk mengedit tag</span>
             <button id="clearAllBtn" class="text-[11px] text-red-300 hover:text-red-200"><i class="fa-solid fa-trash"></i> Hapus semua</button>
           </div>
-          <div id="photoList" class="grid grid-cols-4 sm:grid-cols-5 gap-2 max-h-48 overflow-y-auto"></div>
+          <div id="photoList" class="grid grid-cols-4 sm:grid-cols-5 gap-2 max-h-64 overflow-y-auto"></div>
+          <div class="flex items-center gap-2 mt-2 text-[11px]">
+            <button id="moveLeftBtn" class="flex-1 bg-slate-700 hover:bg-slate-600 rounded-lg py-1.5"><i class="fa-solid fa-arrow-left"></i> Geser kiri</button>
+            <button id="moveRightBtn" class="flex-1 bg-slate-700 hover:bg-slate-600 rounded-lg py-1.5">Geser kanan <i class="fa-solid fa-arrow-right"></i></button>
+            <input id="moveToInput" type="number" min="1" placeholder="No." class="w-14 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5" />
+            <button id="moveToBtn" class="bg-slate-700 hover:bg-slate-600 rounded-lg px-2 py-1.5">Pindah</button>
+          </div>
+          <p class="text-[10px] text-slate-500 mt-1">Tip: foto juga bisa diseret (drag &amp; drop) ke posisi lain. Urutan foto = urutan baris spreadsheet.</p>
+        </div>
+      </div>
+
+      <!-- Data Spreadsheet -->
+      <div class="bg-slate-800 rounded-2xl p-5 border border-slate-700/80 shadow-md space-y-3 text-xs">
+        <label class="text-sm font-semibold text-slate-200 flex items-center gap-2"><i class="fa-solid fa-table text-amber-400"></i> Data Spreadsheet (1 baris = 1 foto)</label>
+        <div class="flex gap-2">
+          <input type="file" id="ssFileInput" accept=".xlsx,.xls,.xlsm,.csv" class="hidden" />
+          <button id="ssFileBtn" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-lg whitespace-nowrap"><i class="fa-solid fa-file-excel text-emerald-400"></i> Upload Excel</button>
+          <input type="text" id="ssUrl" placeholder="atau tempel link Google Sheets..." class="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 placeholder-slate-500 focus:outline-none focus:border-amber-400" />
+          <button id="ssUrlBtn" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold px-3 py-2 rounded-lg">Ambil</button>
+        </div>
+        <p class="text-[10px] text-slate-500">Link Google Sheets harus dibagikan "Siapa saja yang memiliki link" (Viewer). Tambahkan <code>#gid=...</code> untuk memilih tab tertentu.</p>
+        <div id="ssConfig" class="hidden space-y-2">
+          <div class="grid grid-cols-2 gap-2">
+            <div><label class="block text-slate-400 mb-1">Sheet / tab:</label><select id="ssSheet" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5"></select></div>
+            <div><label class="block text-slate-400 mb-1">Kolom Tanggal:</label><select id="ssTgl" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5"></select></div>
+            <div><label class="block text-slate-400 mb-1">Kolom Kegiatan (deskripsi):</label><select id="ssKeg" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5"></select></div>
+            <div><label class="block text-slate-400 mb-1">Kolom Tempat (desa):</label><select id="ssTmp" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5"></select></div>
+            <div><label class="block text-slate-400 mb-1">Kolom Nama Foto (opsional):</label><select id="ssFoto" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5"></select></div>
+            <div><label class="block text-slate-400 mb-1">Tanggal bentuk 5/8/2026 dibaca:</label><select id="ssOrder" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5"><option value="dmy">Hari/Bulan/Tahun</option><option value="mdy">Bulan/Hari/Tahun</option></select></div>
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1">Isi Catatan (tersedia: {kegiatan} {tempat} {tanggal} {hari}):</label>
+            <input type="text" id="ssTemplate" value="{kegiatan}" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 focus:outline-none focus:border-amber-400" />
+          </div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <label class="flex items-center gap-1.5"><input type="checkbox" id="ssRandom" checked class="accent-amber-400" /> Jam acak</label>
+            <input type="time" id="ssMin" value="08:00" class="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1" />
+            <span>s/d</span>
+            <input type="time" id="ssMax" value="11:00" class="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1" />
+            <button id="ssRandBtn" class="bg-slate-700 hover:bg-slate-600 px-2 py-1.5 rounded-lg"><i class="fa-solid fa-dice"></i> Acak ulang jam</button>
+          </div>
+          <div class="space-y-1">
+            <label class="flex items-center gap-1.5"><input type="checkbox" id="ssUseTempat" checked class="accent-amber-400" /> Kolom Tempat dipakai sebagai Baris 1 lokasi</label>
+            <label class="flex items-center gap-1.5"><input type="checkbox" id="ssMatchFoto" checked class="accent-amber-400" /> Cocokkan nama file foto dengan kolom Nama Foto (jika cocok)</label>
+            <label class="flex items-center gap-1.5"><input type="checkbox" id="ssFollow" checked class="accent-amber-400" /> Saat foto digeser, tag tetap di posisi/baris (yang pindah hanya gambarnya)</label>
+          </div>
+          <div id="ssInfo" class="text-amber-300"></div>
+          <div class="flex gap-2">
+            <button id="ssApplyBtn" class="flex-1 bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-semibold py-2 rounded-lg">Terapkan ke Foto</button>
+            <button id="ssGeoBtn" class="flex-1 bg-slate-700 hover:bg-slate-600 py-2 rounded-lg" title="Cari koordinat tiap nama desa lewat OpenStreetMap">Cari koordinat tiap desa</button>
+          </div>
         </div>
       </div>
 
@@ -215,21 +266,25 @@
     function addFiles(files) {
       const list = Array.from(files).filter(f => f && f.type.startsWith('image/'));
       if (!list.length) { showToast('Tidak ada file gambar yang valid.', true); return; }
+      if (list.length > 1) list.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true }));
       const base = readForm(); // foto baru mewarisi tag yang sedang di form
-      let loaded = 0;
-      list.forEach((file) => {
-        const url = URL.createObjectURL(file);
-        const img = new Image();
-        img.onload = () => {
-          const p = { id: ++uid, name: file.name || `foto-${uid}.png`, img, url, meta: { ...base } };
-          photos.push(p);
-          if (++loaded === list.length) {
-            selectPhoto(p.id);
-            showToast(`${list.length} foto ditambahkan.`);
-          }
-        };
-        img.onerror = () => { loaded++; showToast('Gagal membaca satu gambar.', true); };
+      Promise.all(list.map((file) => new Promise((res) => {
+        const url = URL.createObjectURL(file), img = new Image();
+        img.onload = () => res({ id: ++uid, name: file.name || `foto-${uid}.png`, img, url });
+        img.onerror = () => res(null);
         img.src = url;
+      }))).then((items) => {
+        const ok = items.filter(Boolean);
+        if (ok.length < items.length) showToast('Sebagian gambar gagal dibaca.', true);
+        if (!ok.length) return;
+        ok.forEach((p) => {
+          p.meta = { ...base };
+          const row = rows[photos.length];
+          if (row) Object.assign(p.meta, metaFromRow(row));
+          photos.push(p);
+        });
+        selectPhoto(ok[0].id);
+        showToast(`${ok.length} foto ditambahkan.`);
       });
     }
 
@@ -253,23 +308,50 @@
       renderPreview();
     }
 
+    const idxOf = () => photos.findIndex(p => p.id === selectedId);
+
+    function movePhoto(from, to) {
+      if (from < 0 || to < 0 || from >= photos.length || to >= photos.length || from === to) return;
+      const keep = (rows.length && $('ssFollow').checked) ? photos.map(p => p.meta) : null;
+      const [p] = photos.splice(from, 1);
+      photos.splice(to, 0, p);
+      if (keep) photos.forEach((q, i) => q.meta = keep[i]); // tag tetap di posisi, gambar yang pindah
+      const cur = current(); if (cur) writeForm(cur.meta);
+      refreshList(); renderPreview();
+    }
+
     function refreshList() {
       const wrap = $('photoListWrap'), list = $('photoList');
       wrap.classList.toggle('hidden', photos.length === 0);
       $('photoCount').textContent = photos.length;
       list.innerHTML = '';
       photos.forEach((p, i) => {
-        const d = document.createElement('div');
-        d.className = 'thumb relative aspect-square rounded-lg overflow-hidden cursor-pointer bg-slate-900' + (p.id === selectedId ? ' active' : '');
-        d.innerHTML = `<img src="${p.url}" class="w-full h-full object-cover" alt=""><span class="absolute bottom-0 left-0 bg-black/60 text-[10px] px-1">${i + 1}</span>
-          <button class="absolute top-0 right-0 bg-red-600/80 hover:bg-red-500 text-[10px] w-5 h-5 leading-5 text-center" title="Hapus">&times;</button>`;
-        d.addEventListener('click', () => selectPhoto(p.id));
-        d.querySelector('button').addEventListener('click', (e) => { e.stopPropagation(); removePhoto(p.id); });
-        list.appendChild(d);
+        const cell = document.createElement('div');
+        cell.draggable = true;
+        cell.className = 'cursor-grab';
+        const short = `${(p.meta.dateFmt || '').slice(0, 5)} ${(p.meta.desa || '').replace(/^(desa|kel\.?|kelurahan)\s+/i, '')}`;
+        cell.innerHTML = `<div class="thumb relative aspect-square rounded-lg overflow-hidden bg-slate-900${p.id === selectedId ? ' active' : ''}">
+            <img src="${p.url}" draggable="false" class="w-full h-full object-cover" alt=""><span class="absolute bottom-0 left-0 bg-black/60 text-[10px] px-1">${i + 1}</span>
+            <button class="absolute top-0 right-0 bg-red-600/80 hover:bg-red-500 text-[10px] w-5 h-5 leading-5 text-center" title="Hapus">&times;</button></div>
+          <div class="text-[9px] text-slate-400 truncate text-center mt-0.5"></div>`;
+        cell.lastElementChild.textContent = short;
+        cell.addEventListener('click', () => selectPhoto(p.id));
+        cell.querySelector('button').addEventListener('click', (e) => { e.stopPropagation(); removePhoto(p.id); });
+        cell.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/x-photo-index', String(i)); e.dataTransfer.effectAllowed = 'move'; });
+        cell.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('text/x-photo-index')) { e.preventDefault(); cell.classList.add('opacity-60'); } });
+        cell.addEventListener('dragleave', () => cell.classList.remove('opacity-60'));
+        cell.addEventListener('drop', (e) => {
+          cell.classList.remove('opacity-60');
+          const from = parseInt(e.dataTransfer.getData('text/x-photo-index'), 10);
+          if (!isNaN(from)) { e.preventDefault(); movePhoto(from, i); }
+        });
+        list.appendChild(cell);
       });
-      const idx = photos.findIndex(p => p.id === selectedId);
-      $('positionLabel').textContent = `${idx + 1} / ${photos.length}`;
+      $('positionLabel').textContent = `${idxOf() + 1} / ${photos.length}`;
     }
+    $('moveLeftBtn').onclick = () => movePhoto(idxOf(), idxOf() - 1);
+    $('moveRightBtn').onclick = () => movePhoto(idxOf(), idxOf() + 1);
+    $('moveToBtn').onclick = () => { const n = parseInt($('moveToInput').value, 10); if (n >= 1 && n <= photos.length) movePhoto(idxOf(), n - 1); else showToast('Nomor posisi tidak valid.', true); };
 
     function step(dir) {
       if (!photos.length) return;
@@ -548,6 +630,193 @@
       a.href = URL.createObjectURL(await zip.generateAsync({ type: 'blob' }));
       a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
       showToast(`${photos.length} foto diunduh dalam ZIP.`);
+    };
+
+    // ---------- Spreadsheet ----------
+    let wb = null, sheetData = [], rows = [];
+    const str = (v) => v == null ? '' : String(v).trim();
+    const colLetter = (i) => { let n = i + 1, s = ''; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; };
+    const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, mei: 5, may: 5, jun: 6, jul: 7, agu: 8, aug: 8, sep: 9, okt: 10, oct: 10, nov: 11, des: 12, dec: 12 };
+    const SS = { tgl: $('ssTgl'), keg: $('ssKeg'), tmp: $('ssTmp'), foto: $('ssFoto') };
+
+    function parseDate(v) {
+      if (v == null || v === '') return null;
+      let y, m, d;
+      if (typeof v === 'number') {
+        if (v < 20000 || v > 80000) return null;
+        const dt = new Date(Math.round((v - 25569) * 86400000));
+        y = dt.getUTCFullYear(); m = dt.getUTCMonth() + 1; d = dt.getUTCDate();
+      } else if (v instanceof Date) {
+        y = v.getFullYear(); m = v.getMonth() + 1; d = v.getDate();
+      } else {
+        const t = String(v).trim(); let x;
+        if ((x = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) { y = +x[1]; m = +x[2]; d = +x[3]; }
+        else if ((x = t.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/))) {
+          y = +x[3]; if (y < 100) y += 2000;
+          if ($('ssOrder').value === 'mdy') { m = +x[1]; d = +x[2]; } else { d = +x[1]; m = +x[2]; }
+          if (m > 12) [m, d] = [d, m];
+        } else if ((x = t.match(/^(\d{1,2})\s+([A-Za-z]+)\.?\s+(\d{4})/))) {
+          d = +x[1]; m = MONTHS[x[2].slice(0, 3).toLowerCase()]; y = +x[3];
+        } else return null;
+      }
+      if (!y || !m || !d || y < 2000 || m > 12 || d > 31 || d < 1) return null;
+      return { y, m, d };
+    }
+
+    const toMin = (s) => { const [h, m] = (s || '0:0').split(':').map(Number); return h * 60 + m; };
+    function randTime() {
+      let a = toMin($('ssMin').value || '08:00'), b = toMin($('ssMax').value || '11:00');
+      if (b < a) [a, b] = [b, a];
+      const t = a + Math.floor(Math.random() * (b - a + 1));
+      return `${pad(Math.floor(t / 60))}:${pad(t % 60)}`;
+    }
+
+    function metaFromRow(r) {
+      const { y, m, d } = r.date, m2 = {};
+      const day = DAYS[new Date(y, m - 1, d).getDay()], dateFmt = `${pad(d)}/${pad(m)}/${y}`;
+      m2.date = `${y}-${pad(m)}-${pad(d)}`; m2.day = day; m2.dateFmt = dateFmt;
+      if ($('ssUseTempat').checked && r.tempat) m2.desa = r.tempat;
+      m2.notes = $('ssTemplate').value.replace(/\{kegiatan\}/gi, r.kegiatan).replace(/\{tempat\}/gi, r.tempat)
+        .replace(/\{tanggal\}/gi, dateFmt).replace(/\{hari\}/gi, day).trim();
+      if ($('ssRandom').checked) m2.time = randTime();
+      return m2;
+    }
+
+    function buildRows() {
+      rows = [];
+      const c = { tgl: +SS.tgl.value, keg: +SS.keg.value, tmp: +SS.tmp.value, foto: +SS.foto.value };
+      for (let r = 1; r < sheetData.length; r++) {
+        const row = sheetData[r], dt = parseDate(row[c.tgl]);
+        if (!dt) continue;
+        const kegiatan = c.keg >= 0 ? str(row[c.keg]) : '', tempat = c.tmp >= 0 ? str(row[c.tmp]) : '';
+        if (!kegiatan && !tempat) continue;
+        const foto = c.foto >= 0 ? str(row[c.foto]).split(/[\\\/]/).pop() : '';
+        rows.push({ date: dt, kegiatan, tempat, foto });
+      }
+      $('ssInfo').textContent = `${rows.length} baris data terbaca, ${photos.length} foto.`;
+    }
+
+    function fillColumnSelects() {
+      const hdr = sheetData[0] || [];
+      const opts = (none) => (none ? '<option value="-1">(tidak dipakai)</option>' : '') +
+        hdr.map((h, i) => str(h) ? `<option value="${i}">${colLetter(i)} - ${str(h)}</option>` : '').join('');
+      Object.values(SS).forEach(el => el.innerHTML = opts(el !== SS.tgl));
+      const find = (re) => hdr.findIndex(h => re.test(str(h)));
+      const tglIdx = hdr.map((h, i) => /tanggal|tgl/i.test(str(h)) ? i : -1).filter(i => i >= 0)
+        .find(i => sheetData.slice(1, 8).some(r => parseDate(r[i])));
+      SS.tgl.value = tglIdx != null ? tglIdx : Math.max(0, find(/tanggal|tgl/i));
+      SS.keg.value = find(/kegiatan|deskripsi|uraian/i);
+      SS.tmp.value = find(/tempat|desa|lokasi/i);
+      SS.foto.value = find(/foto/i);
+    }
+
+    function onSheetChange() {
+      const ws = wb.Sheets[$('ssSheet').value];
+      let data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+      const h = data.findIndex(r => r.filter(x => str(x)).length >= 3);
+      sheetData = h >= 0 ? data.slice(h) : data;
+      fillColumnSelects(); buildRows();
+    }
+
+    function loadWorkbook(w, label) {
+      wb = w;
+      const names = wb.SheetNames;
+      $('ssSheet').innerHTML = names.map(n => `<option value="${n.replace(/"/g, '&quot;')}">${n}</option>`).join('');
+      const pref = names.find(n => { const r = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: '' }).slice(0, 3); return r.some(row => row.some(x => /kegiatan/i.test(str(x)))); });
+      if (pref) $('ssSheet').value = pref;
+      $('ssConfig').classList.remove('hidden');
+      onSheetChange();
+      showToast(`${label}: ${rows.length} baris terbaca.`);
+      if (photos.length && rows.length) applyRows();
+    }
+
+    $('ssFileBtn').onclick = () => $('ssFileInput').click();
+    $('ssFileInput').addEventListener('change', async (e) => {
+      const f = e.target.files[0]; e.target.value = '';
+      if (!f) return;
+      if (typeof XLSX === 'undefined') { showToast('Library Excel gagal dimuat (cek internet).', true); return; }
+      try {
+        const isCsv = /\.csv$/i.test(f.name);
+        loadWorkbook(isCsv ? XLSX.read(await f.text(), { type: 'string', raw: true }) : XLSX.read(await f.arrayBuffer(), { type: 'array' }), f.name);
+      } catch (err) { showToast('Gagal membaca file Excel.', true); }
+    });
+
+    $('ssUrlBtn').onclick = async () => {
+      const url = $('ssUrl').value.trim();
+      if (!url) return;
+      if (typeof XLSX === 'undefined') { showToast('Library Excel gagal dimuat (cek internet).', true); return; }
+      const m = url.match(/\/d\/([\w-]+)/), gid = (url.match(/[?#&]gid=(\d+)/) || [])[1];
+      $('ssUrlBtn').disabled = true;
+      try {
+        let w;
+        if (m) {
+          const res = await fetch(`https://docs.google.com/spreadsheets/d/${m[1]}/gviz/tq?tqx=out:csv${gid ? '&gid=' + gid : ''}`);
+          const text = await res.text();
+          if (!res.ok || /^\s*<(!doctype|html)/i.test(text)) throw new Error('private');
+          w = XLSX.read(text, { type: 'string', raw: true });
+        } else {
+          const res = await fetch(url); if (!res.ok) throw new Error('http');
+          w = XLSX.read(await res.arrayBuffer(), { type: 'array' });
+        }
+        loadWorkbook(w, 'Spreadsheet');
+      } catch (err) {
+        showToast('Gagal mengambil spreadsheet. Pastikan link dibagikan "Siapa saja yang memiliki link", atau upload file Excel.', true);
+      } finally { $('ssUrlBtn').disabled = false; }
+    };
+
+    ['ssSheet'].forEach(id => $(id).addEventListener('change', onSheetChange));
+    [...Object.values(SS), $('ssOrder')].forEach(el => el.addEventListener('change', buildRows));
+
+    function matchPhotosByName() {
+      const pool = [...photos], out = [];
+      rows.forEach((r, i) => {
+        const k = r.foto ? pool.findIndex(p => p.name.toLowerCase() === r.foto.toLowerCase()) : -1;
+        out[i] = k >= 0 ? pool.splice(k, 1)[0] : null;
+      });
+      for (let i = 0; i < out.length; i++) if (!out[i]) out[i] = pool.shift() || null;
+      photos = out.filter(Boolean).concat(pool);
+    }
+
+    function applyRows() {
+      if (!rows.length) { showToast('Belum ada data baris dari spreadsheet.', true); return; }
+      if (!photos.length) { showToast('Tambahkan foto dulu, lalu tekan Terapkan.', true); return; }
+      if ($('ssMatchFoto').checked && rows.some(r => r.foto)) matchPhotosByName();
+      photos.forEach((p, i) => { if (rows[i]) Object.assign(p.meta, metaFromRow(rows[i])); });
+      const cur = current(); if (cur) writeForm(cur.meta);
+      refreshList(); renderPreview();
+      const diff = rows.length - photos.length;
+      $('ssInfo').textContent = `${rows.length} baris, ${photos.length} foto` + (diff > 0 ? ` - ${diff} baris belum punya foto.` : diff < 0 ? ` - ${-diff} foto kelebihan (tag tidak diubah).` : '.');
+      showToast(diff === 0 ? 'Data spreadsheet diterapkan ke semua foto.' : 'Diterapkan. Jumlah baris dan foto tidak sama, cek keterangan.', diff !== 0);
+    }
+    $('ssApplyBtn').onclick = applyRows;
+
+    $('ssRandBtn').onclick = () => {
+      if (!photos.length) return;
+      photos.forEach(p => p.meta.time = randTime());
+      const cur = current(); if (cur) writeForm(cur.meta);
+      refreshList(); renderPreview(); showToast('Jam diacak ulang.');
+    };
+
+    $('ssGeoBtn').onclick = async () => {
+      const strip = (t) => t.replace(/\b(desa|kelurahan|kel\.?|kecamatan|kec\.?|kabupaten|kab\.?)\s*/gi, '').trim();
+      const area = F.kecKab.value.split(',').map(strip).filter(Boolean).join(' ');
+      const names = [...new Set(photos.map(p => p.meta.desa).filter(Boolean))];
+      if (!names.length) { showToast('Belum ada nama desa.', true); return; }
+      const missing = [];
+      for (let i = 0; i < names.length; i++) {
+        setStatus(true, `Mencari koordinat ${names[i]} (${i + 1}/${names.length})...`);
+        try {
+          const q = `${strip(names[i])} ${area}`;
+          const data = await (await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&limit=1&countrycodes=id&accept-language=id`)).json();
+          if (data && data.length) photos.filter(p => p.meta.desa === names[i]).forEach(p => { p.meta.lat = Number(data[0].lat).toFixed(7); p.meta.lng = Number(data[0].lon).toFixed(7); });
+          else missing.push(names[i]);
+        } catch (e) { missing.push(names[i]); }
+        await new Promise(r => setTimeout(r, 1100)); // batas 1 permintaan/detik Nominatim
+      }
+      setStatus(false);
+      const cur = current(); if (cur) writeForm(cur.meta);
+      renderPreview();
+      showToast(missing.length ? `Koordinat tidak ditemukan: ${missing.join(', ')}` : 'Koordinat tiap desa diperbarui.', missing.length > 0);
     };
 
     // ---------- Init ----------
