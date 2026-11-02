@@ -90,6 +90,7 @@
             <div><label class="block text-slate-400 mb-1">Kolom Kegiatan (deskripsi):</label><select id="ssKeg" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5"></select></div>
             <div><label class="block text-slate-400 mb-1">Kolom Tempat (desa):</label><select id="ssTmp" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5"></select></div>
             <div><label class="block text-slate-400 mb-1">Kolom Nama Foto (opsional):</label><select id="ssFoto" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5"></select></div>
+            <div><label class="block text-slate-400 mb-1">Kolom Petugas 1 (untuk nama file):</label><select id="ssPet" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5"></select></div>
             <div><label class="block text-slate-400 mb-1">Tanggal bentuk 5/8/2026 dibaca:</label><select id="ssOrder" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5"><option value="dmy">Hari/Bulan/Tahun</option><option value="mdy">Bulan/Hari/Tahun</option></select></div>
           </div>
           <div>
@@ -401,7 +402,7 @@
     // ---------- Sinkron form -> foto terpilih ----------
     function syncFormToPhoto() {
       const p = current();
-      if (p) p.meta = readForm();
+      if (p) p.meta = { ...p.meta, ...readForm() }; // pertahankan tempat/petugas dari spreadsheet
       renderPreview();
     }
     Object.values(F).forEach(el => el.addEventListener('input', syncFormToPhoto));
@@ -417,7 +418,7 @@
 
     $('applyAllBtn').onclick = () => {
       const m = readForm();
-      photos.forEach(p => p.meta = { ...m });
+      photos.forEach(p => p.meta = { ...p.meta, ...m });
       renderPreview(); showToast('Semua tag diterapkan ke semua foto.');
     };
     $('applyLocAllBtn').onclick = () => {
@@ -520,6 +521,27 @@
       return `${Math.abs(la).toFixed(7)}°${la < 0 ? 'S' : 'N'}, ${Math.abs(lo).toFixed(7)}°${lo < 0 ? 'W' : 'E'}`;
     }
 
+    // Pecah teks menjadi beberapa baris sesuai lebar maksimum (ctx.font harus sudah diatur)
+    function wrapText(ctx, text, maxW) {
+      const lines = [];
+      let line = '';
+      const pushLong = (word) => { // kata tunggal lebih lebar dari maxW: potong per karakter
+        let part = '';
+        for (const ch of word) {
+          if (ctx.measureText(part + ch).width > maxW && part) { lines.push(part); part = ch; } else part += ch;
+        }
+        return part;
+      };
+      for (const word of String(text).replace(/\s+/g, ' ').trim().split(' ')) {
+        const test = line ? `${line} ${word}` : word;
+        if (ctx.measureText(test).width <= maxW) { line = test; continue; }
+        if (line) lines.push(line);
+        line = ctx.measureText(word).width > maxW ? pushLong(word) : word;
+      }
+      if (line) lines.push(line);
+      return lines.length ? lines : [''];
+    }
+
     function drawPhoto(cv, img, m) {
       const ctx = cv.getContext('2d');
       const imgW = img.naturalWidth || img.width, imgH = img.naturalHeight || img.height;
@@ -529,7 +551,12 @@
       const padLeft = 30 * s, padBottom = 35 * s;
       const FONT = "'Roboto Condensed', sans-serif";
 
-      const gh = 320 * s, gw = Math.min(imgW * 0.85, 750 * s);
+      // Catatan panjang: pecah ke baris berikutnya agar tidak melebihi foto
+      const fs1 = Math.round(23 * s);
+      ctx.font = `500 ${fs1}px ${FONT}`;
+      const gw = Math.min(imgW * 0.85, 750 * s);
+      const noteLines = wrapText(ctx, `Catatan: ${m.notes || ''}`, gw - padLeft);
+      const gh = 320 * s + (noteLines.length - 1) * (fs1 + 4 * s);
       const g = ctx.createLinearGradient(0, imgH, 0, imgH - gh);
       g.addColorStop(0, 'rgba(0,0,0,0.72)'); g.addColorStop(0.6, 'rgba(0,0,0,0.35)'); g.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = g; ctx.fillRect(0, imgH - gh, gw, gh);
@@ -541,9 +568,11 @@
       ctx.fillStyle = '#FFFFFF';
       let y = imgH - padBottom;
 
-      const fs1 = Math.round(23 * s);
       ctx.font = `500 ${fs1}px ${FONT}`;
-      y -= fs1 + 6 * s; ctx.fillText(`Catatan: ${m.notes}`, padLeft, y);
+      for (let li = noteLines.length - 1; li >= 0; li--) {
+        y -= fs1 + (li === noteLines.length - 1 ? 6 : 4) * s;
+        ctx.fillText(noteLines[li], padLeft, y);
+      }
       y -= fs1 + 8 * s; ctx.fillText(`Koordinat: ${fmtCoord(m.lat, m.lng)}`, padLeft, y);
 
       const fsA = Math.round(24 * s);
@@ -603,11 +632,23 @@
     const baseName = (n) => n.replace(/\.[^.]+$/, '');
     const toBlob = (cv) => new Promise(res => cv.toBlob(res, 'image/jpeg', 0.95));
 
+    // Nama file: tanggal_tempat_petugas1 (dari spreadsheet); jika tidak ada data spreadsheet, pakai nama lama
+    const cleanPart = (t) => String(t || '').replace(/[\\\/:*?"<>|\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+    function fileNameFor(p, i) {
+      const m = p.meta;
+      if (m.tempat || m.petugas) {
+        const parts = [cleanPart((m.dateFmt || '').replace(/\//g, '-')), cleanPart(m.tempat), cleanPart(m.petugas)].filter(Boolean);
+        const n = parts.join('_').slice(0, 150);
+        if (n) return n;
+      }
+      return `Timemark_${i != null ? String(i + 1).padStart(2, '0') + '_' : ''}${baseName(p.name)}`;
+    }
+
     $('downloadBtn').onclick = async () => {
       const p = current();
       if (!p) { showToast('Tambahkan foto terlebih dahulu.', true); return; }
       const a = document.createElement('a');
-      a.download = `Timemark_${baseName(p.name)}.jpg`;
+      a.download = `${fileNameFor(p)}.jpg`;
       a.href = URL.createObjectURL(await toBlob(canvas));
       a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
       showToast('Foto diunduh.');
@@ -621,7 +662,7 @@
       for (let i = 0; i < photos.length; i++) {
         const p = photos[i];
         drawPhoto(off, p.img, p.meta);
-        let n = `Timemark_${String(i + 1).padStart(2, '0')}_${baseName(p.name)}`;
+        let n = fileNameFor(p, i);
         used[n] = (used[n] || 0) + 1; if (used[n] > 1) n += `_${used[n]}`;
         zip.file(`${n}.jpg`, await toBlob(off));
       }
@@ -637,7 +678,7 @@
     const str = (v) => v == null ? '' : String(v).trim();
     const colLetter = (i) => { let n = i + 1, s = ''; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; };
     const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, mei: 5, may: 5, jun: 6, jul: 7, agu: 8, aug: 8, sep: 9, okt: 10, oct: 10, nov: 11, des: 12, dec: 12 };
-    const SS = { tgl: $('ssTgl'), keg: $('ssKeg'), tmp: $('ssTmp'), foto: $('ssFoto') };
+    const SS = { tgl: $('ssTgl'), keg: $('ssKeg'), tmp: $('ssTmp'), foto: $('ssFoto'), pet: $('ssPet') };
 
     function parseDate(v) {
       if (v == null || v === '') return null;
@@ -675,6 +716,7 @@
       const { y, m, d } = r.date, m2 = {};
       const day = DAYS[new Date(y, m - 1, d).getDay()], dateFmt = `${pad(d)}/${pad(m)}/${y}`;
       m2.date = `${y}-${pad(m)}-${pad(d)}`; m2.day = day; m2.dateFmt = dateFmt;
+      m2.tempat = r.tempat; m2.petugas = r.petugas; // dipakai untuk nama file
       if ($('ssUseTempat').checked && r.tempat) m2.desa = r.tempat;
       m2.notes = $('ssTemplate').value.replace(/\{kegiatan\}/gi, r.kegiatan).replace(/\{tempat\}/gi, r.tempat)
         .replace(/\{tanggal\}/gi, dateFmt).replace(/\{hari\}/gi, day).trim();
@@ -684,14 +726,15 @@
 
     function buildRows() {
       rows = [];
-      const c = { tgl: +SS.tgl.value, keg: +SS.keg.value, tmp: +SS.tmp.value, foto: +SS.foto.value };
+      const c = { tgl: +SS.tgl.value, keg: +SS.keg.value, tmp: +SS.tmp.value, foto: +SS.foto.value, pet: +SS.pet.value };
       for (let r = 1; r < sheetData.length; r++) {
         const row = sheetData[r], dt = parseDate(row[c.tgl]);
         if (!dt) continue;
         const kegiatan = c.keg >= 0 ? str(row[c.keg]) : '', tempat = c.tmp >= 0 ? str(row[c.tmp]) : '';
         if (!kegiatan && !tempat) continue;
         const foto = c.foto >= 0 ? str(row[c.foto]).split(/[\\\/]/).pop() : '';
-        rows.push({ date: dt, kegiatan, tempat, foto });
+        const petugas = c.pet >= 0 ? str(row[c.pet]) : '';
+        rows.push({ date: dt, kegiatan, tempat, foto, petugas });
       }
       $('ssInfo').textContent = `${rows.length} baris data terbaca, ${photos.length} foto.`;
     }
@@ -712,6 +755,8 @@
       SS.keg.value = find(/kegiatan|deskripsi|uraian/i);
       SS.tmp.value = find(/tempat|desa|lokasi/i);
       SS.foto.value = find(/foto/i);
+      const pi = find(/petugas\s*(1|satu|i)\b/i);
+      SS.pet.value = pi >= 0 ? pi : find(/petugas/i);
     }
 
     function onSheetChange() {
