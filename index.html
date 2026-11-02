@@ -109,6 +109,22 @@
             <label class="flex items-center gap-1.5"><input type="checkbox" id="ssMatchFoto" checked class="accent-amber-400" /> Cocokkan nama file foto dengan kolom Nama Foto (jika cocok)</label>
             <label class="flex items-center gap-1.5"><input type="checkbox" id="ssFollow" checked class="accent-amber-400" /> Saat foto digeser, tag tetap di posisi/baris (yang pindah hanya gambarnya)</label>
           </div>
+          <details open class="border border-slate-700 rounded-lg p-2">
+            <summary class="cursor-pointer text-slate-200 font-semibold">Pilih baris yang dipakai (<span id="rowSelCount">0</span>/<span id="rowTotal">0</span>)</summary>
+            <div class="space-y-2 mt-2">
+              <p class="text-[10px] text-slate-500">Foto hanya dicocokkan ke baris yang dicentang, sesuai urutan. Baris yang fotonya sudah pernah diunduh otomatis ditandai &amp; tidak dicentang lagi.</p>
+              <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+                <button id="rowAll" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded-lg">Semua</button>
+                <button id="rowNone" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded-lg">Kosongkan</button>
+                <button id="rowNew" class="bg-emerald-500/80 hover:bg-emerald-400 text-slate-950 font-semibold px-2 py-1 rounded-lg">Hanya yang belum diunduh</button>
+                <span class="text-slate-400">Mulai dari no.</span>
+                <input id="rowFrom" type="number" min="1" class="w-14 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1" />
+                <button id="rowFromBtn" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded-lg">Pilih</button>
+                <button id="rowResetDone" class="text-red-300 hover:text-red-200 px-1 py-1 ml-auto">Reset penanda</button>
+              </div>
+              <div id="rowList" class="max-h-52 overflow-y-auto space-y-0.5"></div>
+            </div>
+          </details>
           <div id="ssInfo" class="text-amber-300"></div>
           <div class="flex gap-2">
             <button id="ssApplyBtn" class="flex-1 bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-semibold py-2 rounded-lg">Terapkan ke Foto</button>
@@ -280,7 +296,7 @@
         if (!ok.length) return;
         ok.forEach((p) => {
           p.meta = { ...base };
-          const row = rows[photos.length];
+          const row = activeRows()[photos.length];
           if (row) Object.assign(p.meta, metaFromRow(row));
           photos.push(p);
         });
@@ -313,7 +329,7 @@
 
     function movePhoto(from, to) {
       if (from < 0 || to < 0 || from >= photos.length || to >= photos.length || from === to) return;
-      const keep = (rows.length && $('ssFollow').checked) ? photos.map(p => p.meta) : null;
+      const keep = (activeRows().length && $('ssFollow').checked) ? photos.map(p => p.meta) : null;
       const [p] = photos.splice(from, 1);
       photos.splice(to, 0, p);
       if (keep) photos.forEach((q, i) => q.meta = keep[i]); // tag tetap di posisi, gambar yang pindah
@@ -651,6 +667,7 @@
       a.download = `${fileNameFor(p)}.jpg`;
       a.href = URL.createObjectURL(await toBlob(canvas));
       a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      markDone([p]);
       showToast('Foto diunduh.');
     };
 
@@ -670,11 +687,55 @@
       a.download = `Timemark_Foto_${new Date().toISOString().slice(0, 10)}.zip`;
       a.href = URL.createObjectURL(await zip.generateAsync({ type: 'blob' }));
       a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      markDone(photos);
       showToast(`${photos.length} foto diunduh dalam ZIP.`);
     };
 
     // ---------- Spreadsheet ----------
     let wb = null, sheetData = [], rows = [];
+
+    // ---------- Pilihan baris + penanda "sudah diunduh" (disimpan di browser) ----------
+    const DONE_KEY = 'timemark_done_v1';
+    let doneSet = new Set();
+    try { doneSet = new Set(JSON.parse(localStorage.getItem(DONE_KEY) || '[]')); } catch (e) {}
+    const saveDone = () => { try { localStorage.setItem(DONE_KEY, JSON.stringify([...doneSet])); } catch (e) {} };
+    let rowSel = new Set();
+    const activeRows = () => rows.filter(r => rowSel.has(r.key));
+    function markDone(list) {
+      let ch = false;
+      list.forEach(p => { if (p.meta.rowKey && !doneSet.has(p.meta.rowKey)) { doneSet.add(p.meta.rowKey); ch = true; } });
+      if (ch) { saveDone(); renderRowList(); }
+    }
+    function updateRowInfo() {
+      $('rowSelCount').textContent = rowSel.size; $('rowTotal').textContent = rows.length;
+      const n = activeRows().length, diff = n - photos.length;
+      $('ssInfo').textContent = `${rows.length} baris terbaca, ${n} dipilih, ${photos.length} foto` +
+        (n && photos.length ? (diff > 0 ? ` - ${diff} baris terpilih belum punya foto.` : diff < 0 ? ` - ${-diff} foto kelebihan (tag tidak diubah).` : '.') : '.');
+    }
+    function renderRowList() {
+      const box = $('rowList'); box.innerHTML = '';
+      rows.forEach((r) => {
+        const done = doneSet.has(r.key);
+        const lab = document.createElement('label');
+        lab.className = 'flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-slate-700/50 cursor-pointer' + (done ? ' opacity-70' : '');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.className = 'accent-amber-400'; cb.checked = rowSel.has(r.key);
+        cb.addEventListener('change', () => { cb.checked ? rowSel.add(r.key) : rowSel.delete(r.key); updateRowInfo(); });
+        const txt = document.createElement('span');
+        txt.className = 'truncate flex-1';
+        txt.textContent = `${r.no}. ${pad(r.date.d)}/${pad(r.date.m)} ${r.tempat} - ${r.kegiatan}`;
+        lab.append(cb, txt);
+        if (done) { const b = document.createElement('span'); b.className = 'text-[9px] bg-emerald-500/20 text-emerald-300 px-1 rounded'; b.textContent = 'sudah diunduh'; lab.appendChild(b); }
+        box.appendChild(lab);
+      });
+      updateRowInfo();
+    }
+    const setSel = (fn) => { rowSel = new Set(rows.filter(fn).map(r => r.key)); renderRowList(); };
+    $('rowAll').onclick = () => setSel(() => true);
+    $('rowNone').onclick = () => setSel(() => false);
+    $('rowNew').onclick = () => setSel(r => !doneSet.has(r.key));
+    $('rowFromBtn').onclick = () => { const n = parseInt($('rowFrom').value, 10); if (n >= 1) setSel(r => r.no >= n); else showToast('Isi nomor baris awal.', true); };
+    $('rowResetDone').onclick = () => { if (!confirm('Hapus semua penanda "sudah diunduh"?')) return; doneSet.clear(); saveDone(); setSel(() => true); showToast('Penanda direset.'); };
     const str = (v) => v == null ? '' : String(v).trim();
     const colLetter = (i) => { let n = i + 1, s = ''; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; };
     const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, mei: 5, may: 5, jun: 6, jul: 7, agu: 8, aug: 8, sep: 9, okt: 10, oct: 10, nov: 11, des: 12, dec: 12 };
@@ -716,7 +777,7 @@
       const { y, m, d } = r.date, m2 = {};
       const day = DAYS[new Date(y, m - 1, d).getDay()], dateFmt = `${pad(d)}/${pad(m)}/${y}`;
       m2.date = `${y}-${pad(m)}-${pad(d)}`; m2.day = day; m2.dateFmt = dateFmt;
-      m2.tempat = r.tempat; m2.petugas = r.petugas; // dipakai untuk nama file
+      m2.tempat = r.tempat; m2.petugas = r.petugas; m2.rowKey = r.key; // dipakai untuk nama file & penanda unduh
       if ($('ssUseTempat').checked && r.tempat) m2.desa = r.tempat;
       m2.notes = $('ssTemplate').value.replace(/\{kegiatan\}/gi, r.kegiatan).replace(/\{tempat\}/gi, r.tempat)
         .replace(/\{tanggal\}/gi, dateFmt).replace(/\{hari\}/gi, day).trim();
@@ -725,7 +786,7 @@
     }
 
     function buildRows() {
-      rows = [];
+      rows = []; const seen = {};
       const c = { tgl: +SS.tgl.value, keg: +SS.keg.value, tmp: +SS.tmp.value, foto: +SS.foto.value, pet: +SS.pet.value };
       for (let r = 1; r < sheetData.length; r++) {
         const row = sheetData[r], dt = parseDate(row[c.tgl]);
@@ -734,9 +795,14 @@
         if (!kegiatan && !tempat) continue;
         const foto = c.foto >= 0 ? str(row[c.foto]).split(/[\\\/]/).pop() : '';
         const petugas = c.pet >= 0 ? str(row[c.pet]) : '';
-        rows.push({ date: dt, kegiatan, tempat, foto, petugas });
+        const base = `${dt.y}-${dt.m}-${dt.d}|${tempat}|${kegiatan}|${petugas}`;
+        seen[base] = (seen[base] || 0) + 1; // baris kembar tetap dibedakan
+        rows.push({ date: dt, kegiatan, tempat, foto, petugas, no: rows.length + 1, key: `${base}|${seen[base]}` });
       }
-      $('ssInfo').textContent = `${rows.length} baris data terbaca, ${photos.length} foto.`;
+      // default: kalau sudah ada baris yang pernah diunduh, pilih hanya yang belum
+      const anyDone = rows.some(r => doneSet.has(r.key));
+      rowSel = new Set(rows.filter(r => !anyDone || !doneSet.has(r.key)).map(r => r.key));
+      renderRowList();
     }
 
     function fillColumnSelects() {
@@ -776,7 +842,7 @@
       $('ssConfig').classList.remove('hidden');
       onSheetChange();
       showToast(`${label}: ${rows.length} baris terbaca.`);
-      if (photos.length && rows.length) applyRows();
+      if (photos.length && activeRows().length) applyRows();
     }
 
     $('ssFileBtn').onclick = () => $('ssFileInput').click();
@@ -826,9 +892,9 @@
     ['ssSheet'].forEach(id => $(id).addEventListener('change', onSheetChange));
     [...Object.values(SS), $('ssOrder')].forEach(el => el.addEventListener('change', buildRows));
 
-    function matchPhotosByName() {
+    function matchPhotosByName(R) {
       const pool = [...photos], out = [];
-      rows.forEach((r, i) => {
+      R.forEach((r, i) => {
         const k = r.foto ? pool.findIndex(p => p.name.toLowerCase() === r.foto.toLowerCase()) : -1;
         out[i] = k >= 0 ? pool.splice(k, 1)[0] : null;
       });
@@ -837,14 +903,16 @@
     }
 
     function applyRows() {
+      const R = activeRows();
       if (!rows.length) { showToast('Belum ada data baris dari spreadsheet.', true); return; }
+      if (!R.length) { showToast('Belum ada baris yang dicentang.', true); return; }
       if (!photos.length) { showToast('Tambahkan foto dulu, lalu tekan Terapkan.', true); return; }
-      if ($('ssMatchFoto').checked && rows.some(r => r.foto)) matchPhotosByName();
-      photos.forEach((p, i) => { if (rows[i]) Object.assign(p.meta, metaFromRow(rows[i])); });
+      if ($('ssMatchFoto').checked && R.some(r => r.foto)) matchPhotosByName(R);
+      photos.forEach((p, i) => { if (R[i]) Object.assign(p.meta, metaFromRow(R[i])); });
       const cur = current(); if (cur) writeForm(cur.meta);
       refreshList(); renderPreview();
-      const diff = rows.length - photos.length;
-      $('ssInfo').textContent = `${rows.length} baris, ${photos.length} foto` + (diff > 0 ? ` - ${diff} baris belum punya foto.` : diff < 0 ? ` - ${-diff} foto kelebihan (tag tidak diubah).` : '.');
+      const diff = R.length - photos.length;
+      updateRowInfo();
       showToast(diff === 0 ? 'Data spreadsheet diterapkan ke semua foto.' : 'Diterapkan. Jumlah baris dan foto tidak sama, cek keterangan.', diff !== 0);
     }
     $('ssApplyBtn').onclick = applyRows;
