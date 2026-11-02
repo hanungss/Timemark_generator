@@ -705,6 +705,10 @@
       const tglIdx = hdr.map((h, i) => /tanggal|tgl/i.test(str(h)) ? i : -1).filter(i => i >= 0)
         .find(i => sheetData.slice(1, 8).some(r => parseDate(r[i])));
       SS.tgl.value = tglIdx != null ? tglIdx : Math.max(0, find(/tanggal|tgl/i));
+      // deteksi urutan hari/bulan dari seluruh isi kolom Tanggal (mis. 13/08/2026 => hari dulu)
+      const ti = +SS.tgl.value; let dm = 0, md = 0;
+      sheetData.slice(1).forEach(r => { const x = typeof r[ti] === 'string' && r[ti].trim().match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.]\d{2,4}/); if (x) { if (+x[1] > 12) dm++; if (+x[2] > 12) md++; } });
+      if (dm || md) $('ssOrder').value = md > dm ? 'mdy' : 'dmy';
       SS.keg.value = find(/kegiatan|deskripsi|uraian/i);
       SS.tmp.value = find(/tempat|desa|lokasi/i);
       SS.foto.value = find(/foto/i);
@@ -750,17 +754,27 @@
       try {
         let w;
         if (m) {
-          const res = await fetch(`https://docs.google.com/spreadsheets/d/${m[1]}/gviz/tq?tqx=out:csv${gid ? '&gid=' + gid : ''}`);
-          const text = await res.text();
-          if (!res.ok || /^\s*<(!doctype|html)/i.test(text)) throw new Error('private');
-          w = XLSX.read(text, { type: 'string', raw: true });
+          const base = `https://docs.google.com/spreadsheets/d/${m[1]}`;
+          // 1) Google Sheets asli: CSV via gviz. 2) File Excel (.xlsx) di Drive: ekspor xlsx.
+          try {
+            const res = await fetch(`${base}/gviz/tq?tqx=out:csv${gid ? '&gid=' + gid : ''}`);
+            const text = await res.text();
+            if (!res.ok || /^\s*<(!doctype|html)/i.test(text)) throw new Error('gviz');
+            w = XLSX.read(text, { type: 'string', raw: true });
+          } catch (e1) {
+            const res = await fetch(`${base}/export?format=xlsx`);
+            if (!res.ok) throw new Error('export');
+            const buf = await res.arrayBuffer();
+            if (new Uint8Array(buf.slice(0, 2)).join() !== '80,75') throw new Error('bukan xlsx'); // "PK" = zip/xlsx
+            w = XLSX.read(buf, { type: 'array' });
+          }
         } else {
           const res = await fetch(url); if (!res.ok) throw new Error('http');
           w = XLSX.read(await res.arrayBuffer(), { type: 'array' });
         }
         loadWorkbook(w, 'Spreadsheet');
       } catch (err) {
-        showToast('Gagal mengambil spreadsheet. Pastikan link dibagikan "Siapa saja yang memiliki link", atau upload file Excel.', true);
+        showToast('Gagal mengambil dari link (diblokir Google/bukan publik). Upload file Excel-nya langsung, atau di Google Sheets pilih File > Simpan sebagai Google Spreadsheet lalu bagikan ulang.', true);
       } finally { $('ssUrlBtn').disabled = false; }
     };
 
