@@ -265,6 +265,22 @@
         notes: 'Pemantauan dan kunjungan bumil resti'
       };
     }
+    // Acak 2 angka desimal terakhir koordinat (mis. -7.5918905 -> -7.5918XY) agar tiap foto beda
+    function jitterCoord(v) {
+      const s = String(v ?? '').trim();
+      const m = s.match(/^(-?\d+\.\d{2,})$/);
+      if (!m) return s;
+      return s.slice(0, -2) + String(Math.floor(Math.random() * 100)).padStart(2, '0');
+    }
+    // Beri koordinat acak ke meta; pastikan tidak sama dengan foto lain
+    function randomizeMetaCoord(meta, base, usedList) {
+      const baseLat = base ? base.lat : meta.lat, baseLng = base ? base.lng : meta.lng;
+      const used = new Set(usedList.map(q => q.meta.lat + '|' + q.meta.lng));
+      let lat, lng, tries = 0;
+      do { lat = jitterCoord(baseLat); lng = jitterCoord(baseLng); tries++; }
+      while (used.has(lat + '|' + lng) && tries < 50);
+      meta.lat = lat; meta.lng = lng;
+    }
     const readForm = () => Object.fromEntries(Object.keys(F).map(k => [k, F[k].value]));
     function writeForm(m) { Object.keys(F).forEach(k => F[k].value = m[k] ?? ''); }
     const current = () => photos.find(p => p.id === selectedId) || null;
@@ -298,6 +314,7 @@
           p.meta = { ...base };
           const row = activeRows()[photos.length];
           if (row) Object.assign(p.meta, metaFromRow(row));
+          randomizeMetaCoord(p.meta, null, photos); // koordinat unik per foto
           photos.push(p);
         });
         selectPhoto(ok[0].id);
@@ -439,8 +456,13 @@
     };
     $('applyLocAllBtn').onclick = () => {
       const m = readForm();
-      photos.forEach(p => Object.assign(p.meta, { desa: m.desa, kecKab: m.kecKab, lat: m.lat, lng: m.lng }));
-      renderPreview(); showToast('Lokasi diterapkan ke semua foto.');
+      const done = [];
+      photos.forEach(p => {
+        Object.assign(p.meta, { desa: m.desa, kecKab: m.kecKab, lat: m.lat, lng: m.lng });
+        randomizeMetaCoord(p.meta, m, done); done.push(p);
+      });
+      const cur = current(); if (cur) writeForm(cur.meta);
+      renderPreview(); showToast('Lokasi diterapkan ke semua foto (2 angka koordinat terakhir diacak).');
     };
     $('resetBtn').onclick = () => {
       writeForm(defaultMeta());
@@ -935,7 +957,7 @@
         try {
           const q = `${strip(names[i])} ${area}`;
           const data = await (await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&limit=1&countrycodes=id&accept-language=id`)).json();
-          if (data && data.length) photos.filter(p => p.meta.desa === names[i]).forEach(p => { p.meta.lat = Number(data[0].lat).toFixed(7); p.meta.lng = Number(data[0].lon).toFixed(7); });
+          if (data && data.length) { const b = { lat: Number(data[0].lat).toFixed(7), lng: Number(data[0].lon).toFixed(7) }, done = []; photos.filter(p => p.meta.desa === names[i]).forEach(p => { randomizeMetaCoord(p.meta, b, done); done.push(p); }); }
           else missing.push(names[i]);
         } catch (e) { missing.push(names[i]); }
         await new Promise(r => setTimeout(r, 1100)); // batas 1 permintaan/detik Nominatim
